@@ -1,0 +1,596 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MIDI Router</title>
+<style>
+:root{
+  --bg:#0d0f12; --panel:#15191e; --panel2:#1b2027; --line:#29303a; --line2:#353d4a;
+  --text:#eef1f4; --dim:#a3acb8; --faint:#6c7584;
+  --acc:#5ef0b8; --amber:#ffb547; --red:#ff6262;
+  --mono:ui-monospace,"Cascadia Mono",Consolas,"SF Mono",Menlo,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%}
+body{
+  background:radial-gradient(110% 70% at 50% -15%,#1b2129 0%,var(--bg) 60%) fixed;
+  color:var(--text);font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  -webkit-font-smoothing:antialiased;user-select:none;
+}
+button{font:inherit;color:inherit}
+.app{max-width:980px;margin:0 auto;padding:18px 20px 16px;display:flex;flex-direction:column;gap:14px}
+
+/* cabeçalho */
+header{display:flex;align-items:center;gap:12px}
+.logo{width:40px;height:40px;border-radius:11px;display:grid;place-items:center;flex:none;
+  background:linear-gradient(150deg,#28303a,#111418);border:1px solid var(--line2);
+  box-shadow:inset 0 1px 0 #ffffff14,0 8px 18px -10px #000}
+h1{margin:0;font-size:16px;font-weight:800;letter-spacing:.2em}
+.sub{font-size:13px;color:var(--dim);margin-top:2px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.pill{font-size:11px;font-weight:700;letter-spacing:.08em;padding:2px 8px;border-radius:20px;border:1px solid var(--line2);color:var(--faint)}
+.pill.ok{color:var(--acc);border-color:#2a5e4c}
+.spacer{flex:1}
+.ibtn{width:40px;height:40px;border-radius:11px;border:1px solid var(--line);background:var(--panel2);
+  display:grid;place-items:center;cursor:pointer;color:var(--dim);transition:.15s}
+.ibtn:hover{color:var(--text);border-color:var(--line2)}
+.panic{height:40px;padding:0 16px;border-radius:11px;cursor:pointer;font-size:13px;font-weight:800;letter-spacing:.14em;
+  color:var(--red);background:linear-gradient(180deg,#2b1719,#1d1214);border:1px solid #4d2427;transition:.15s}
+.panic:hover{border-color:#80323a;box-shadow:0 0 16px -4px #ff626288}
+.panic.fired{background:var(--red);color:#1a0d0e}
+
+/* painel de roteamento */
+.board{position:relative;display:grid;grid-template-columns:minmax(180px,1fr) minmax(120px,.85fr) minmax(180px,1fr);
+  background:linear-gradient(180deg,var(--panel),#111418);border:1px solid var(--line);border-radius:18px;
+  padding:16px;min-height:300px;box-shadow:0 20px 40px -28px #000,inset 0 1px 0 #ffffff08}
+.mid{background-image:radial-gradient(#ffffff10 1px,transparent 1.4px);background-size:16px 16px;border-radius:10px;margin:40px 0 0}
+.col{position:relative;z-index:2;display:flex;flex-direction:column;gap:10px;min-width:0}
+.col-h{display:flex;align-items:baseline;gap:8px;height:30px;padding:0 4px}
+.col-h b{font-size:13px;font-weight:800;letter-spacing:.18em}
+.col-h small{font-size:13px;color:var(--faint)}
+.col.out .col-h{justify-content:flex-end}
+.ports{display:flex;flex-direction:column;gap:10px}
+
+.port{position:relative;display:flex;align-items:center;gap:11px;min-height:56px;padding:8px 14px;border-radius:13px;
+  background:linear-gradient(180deg,#20262e,#191d23);border:1px solid var(--line2);cursor:grab;touch-action:none;
+  transition:border-color .15s,box-shadow .15s,background .15s}
+.port:hover{border-color:#46505f}
+.col.in .port{padding-right:30px}
+.col.out .port{padding-left:30px;flex-direction:row}
+.port .name{flex:1;min-width:0;font-size:15.5px;font-weight:620;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.port .cnt{font:700 12px var(--mono);color:var(--faint);min-width:18px;text-align:center}
+.port.linked .cnt{color:var(--c,var(--acc))}
+.port .led{flex:none;width:9px;height:9px;border-radius:50%;background:#2b313a;box-shadow:inset 0 1px 1px #0008}
+.port .led.on{background:var(--c,var(--acc));box-shadow:0 0 10px var(--c,var(--acc))}
+.jack{position:absolute;top:50%;width:18px;height:18px;margin-top:-9px;border-radius:50%;
+  background:radial-gradient(circle,#07090b 0 35%,#3a424e 38% 100%);border:2px solid var(--c,#566070);box-shadow:0 0 0 3px #13171c}
+.col.in .jack{right:-9px}
+.col.out .jack{left:-9px}
+.port.linked .jack{box-shadow:0 0 0 3px #13171c,0 0 10px -2px var(--c,var(--acc))}
+.port.sel{border-color:var(--c,var(--acc));box-shadow:0 0 0 2px color-mix(in srgb,var(--c,var(--acc)) 35%,transparent)}
+.port.target{border-color:var(--acc);background:linear-gradient(180deg,#1e3a31,#16261f)}
+.board.dragging .port{cursor:grabbing}
+.empty{color:var(--dim);font-size:14px;text-align:center;padding:22px 12px;border:1px dashed var(--line2);border-radius:13px}
+
+/* cabos */
+#wires{position:absolute;inset:0;width:100%;height:100%;z-index:1;pointer-events:none;overflow:visible}
+#wires .w{fill:none;stroke:var(--c);stroke-width:3.2;stroke-linecap:round;opacity:.9;transition:stroke-width .08s,opacity .08s}
+#wires .w.loop{stroke-dasharray:7 6}
+#wires .w.hot{stroke-width:5;opacity:1;filter:drop-shadow(0 0 5px var(--c))}
+#wires .w.sel{stroke-width:5;opacity:1}
+#wires .hit{fill:none;stroke:transparent;stroke-width:18;pointer-events:stroke;cursor:pointer}
+#wires .hit:hover + .w{stroke-width:4.6;opacity:1}
+#wires .tmp{fill:none;stroke:var(--acc);stroke-width:3;stroke-dasharray:6 6;opacity:.85}
+#labels{position:absolute;inset:0;z-index:3;pointer-events:none}
+.tag{position:absolute;transform:translate(-50%,-50%);pointer-events:auto;cursor:pointer;white-space:nowrap;
+  font:700 12px var(--mono);color:var(--c);background:#0b0e11;border:1px solid var(--c);border-radius:7px;padding:2px 7px;
+  box-shadow:0 4px 12px -4px #000}
+
+/* monitor */
+.monitor{display:flex;align-items:center;gap:12px;background:#090b0e;border:1px solid var(--line);border-radius:13px;
+  padding:12px 15px;font:14.5px var(--mono);color:#c2f7e1;box-shadow:inset 0 2px 10px #000a}
+.monitor .led{width:9px;height:9px;border-radius:50%;background:#2b313a;flex:none}
+.monitor .led.on{background:var(--acc);box-shadow:0 0 10px var(--acc)}
+.monitor .txt{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.monitor .src{color:var(--faint)}
+.bpm{color:var(--amber);white-space:nowrap;font-weight:700}
+footer{display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:13px;color:var(--faint);padding:0 4px;flex-wrap:wrap}
+.link{background:none;border:0;color:var(--faint);cursor:pointer;padding:0;font-size:13px}
+.link:hover{color:var(--text)}
+.note{font-size:14px;color:#ffdca6;background:#2a2114;border:1px solid #4d3a1d;border-radius:13px;padding:12px 14px}
+
+/* opções do cabo */
+.pop{position:fixed;z-index:10;width:310px;background:linear-gradient(180deg,#1f242c,#171b21);border:1px solid var(--line2);
+  border-radius:15px;padding:14px;box-shadow:0 22px 44px -12px #000d;display:flex;flex-direction:column;gap:12px}
+.pop[hidden]{display:none}
+.pop-title{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--dim);min-width:0}
+.pop-title .dot{width:10px;height:10px;border-radius:50%;background:var(--c);flex:none}
+.pop-title span{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.pop-title b{color:var(--text);font-weight:650}
+.row{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:14px;color:var(--dim)}
+.row.col2{flex-direction:column;align-items:stretch;gap:7px}
+select{background:#0e1115;color:var(--text);border:1px solid var(--line2);border-radius:8px;height:32px;padding:0 8px;font:inherit;font-size:14px}
+.step{display:flex;align-items:center;border:1px solid var(--line2);border-radius:8px;overflow:hidden;background:#0e1115}
+.step button{width:30px;height:32px;border:0;background:none;cursor:pointer;color:var(--dim);font-size:15px}
+.step button:hover{background:#ffffff12;color:var(--text)}
+.step output{min-width:44px;text-align:center;font:700 14px var(--mono);color:var(--text)}
+.tg{display:flex;flex-wrap:wrap;gap:6px}
+.tg button{height:30px;padding:0 10px;border-radius:8px;border:1px solid var(--line2);background:#0e1115;color:var(--dim);cursor:pointer;font-size:13px}
+.tg button:hover{color:var(--text)}
+.tg button.on{color:#1a0d0e;background:var(--red);border-color:var(--red);font-weight:650}
+.tg button:disabled{opacity:.35;cursor:not-allowed}
+.pop-foot{display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--line);padding-top:11px}
+.del{height:32px;padding:0 12px;border-radius:8px;border:1px solid #5a2529;background:#2a1517;color:var(--red);cursor:pointer;font-size:13px;font-weight:650}
+.del:hover{background:#3a1a1d}
+
+.idle{position:fixed;inset:0;z-index:20;background:#0b0d10de;backdrop-filter:blur(4px);display:grid;place-items:center}
+.idle[hidden]{display:none}
+.idle .box{text-align:center;padding:24px;max-width:340px;color:var(--dim);font-size:14px}
+.idle .box b{display:block;color:var(--text);font-size:16px;margin-bottom:8px}
+.idle .box button{margin-top:14px;height:38px;padding:0 16px;border-radius:10px;border:1px solid #2c6a55;background:#173027;color:var(--acc);cursor:pointer;font-weight:700}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="logo" aria-hidden="true">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+        <circle cx="12" cy="12" r="9.5" stroke="#5ef0b8" stroke-width="1.6"/>
+        <rect x="10.6" y="2" width="2.8" height="2.6" rx=".6" fill="#5ef0b8"/>
+        <g fill="#5ef0b8"><circle cx="6.6" cy="12" r="1.25"/><circle cx="17.4" cy="12" r="1.25"/>
+        <circle cx="8.2" cy="15.8" r="1.25"/><circle cx="15.8" cy="15.8" r="1.25"/><circle cx="12" cy="17.4" r="1.25"/></g>
+      </svg>
+    </div>
+    <div>
+      <h1>MIDI ROUTER</h1>
+      <div class="sub"><span id="summary">iniciando…</span><span id="sx" class="pill">SYSEX</span></div>
+    </div>
+    <div class="spacer"></div>
+    <button class="ibtn" id="popout" title="Abrir em janela separada">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>
+    </button>
+    <button class="panic" id="panic" title="All Notes Off + Sustain Off em todas as saídas e canais">PÂNICO</button>
+  </header>
+
+  <div id="msg"></div>
+
+  <div class="board" id="board">
+    <svg id="wires"></svg>
+    <div id="labels"></div>
+    <section class="col in"><div class="col-h"><b>MIDI IN</b><small>controladores</small></div><div class="ports" id="ins"></div></section>
+    <div class="mid"></div>
+    <section class="col out"><div class="col-h"><small>destinos</small><b>MIDI OUT</b></div><div class="ports" id="outs"></div></section>
+  </div>
+
+  <div class="monitor">
+    <span class="led" id="monLed"></span>
+    <span class="txt" id="monTxt"><span class="src">aguardando MIDI…</span></span>
+    <span class="bpm" id="bpm"></span>
+  </div>
+  <footer>
+    <span>Arraste de uma entrada até uma saída para ligar · clique no cabo para opções ou para desligar</span>
+    <button class="link" id="clear">Desligar tudo</button>
+  </footer>
+</div>
+
+<div class="pop" id="pop" hidden>
+  <div class="pop-title"><span class="dot"></span><span><b id="popIn"></b> → <b id="popOut"></b></span></div>
+  <label class="row"><span>Canal de saída</span><select id="popCh"></select></label>
+  <div class="row"><span>Transpor</span>
+    <div class="step"><button data-d="-12" title="−1 oitava">«</button><button data-d="-1" title="−1 semitom">−</button><output id="popTr">0</output><button data-d="1" title="+1 semitom">+</button><button data-d="12" title="+1 oitava">»</button></div>
+  </div>
+  <div class="row col2"><span>Bloquear nesta conexão</span>
+    <div class="tg" id="popBlk">
+      <button data-b="clk" title="Clock, Start/Stop, Song Position">Clock</button>
+      <button data-b="sx">SysEx</button>
+      <button data-b="at" title="Aftertouch de canal e polifônico">Aftertouch</button>
+      <button data-b="pc">Program</button>
+      <button data-b="pb">Pitch bend</button>
+    </div>
+  </div>
+  <div class="pop-foot"><button class="link" id="popReset">Restaurar padrão</button><button class="del" id="popDel">Desligar cabo</button></div>
+</div>
+
+<div class="idle" id="idle" hidden>
+  <div class="box"><b>Roteamento ativo em outra janela</b>Esta janela ficou em pausa para não duplicar as mensagens MIDI.<br><button id="claim">Usar esta janela</button></div>
+</div>
+
+<script>
+'use strict';
+const SEP = '␟', STORE = 'midirouter.v2';
+const $ = id => document.getElementById(id);
+const NS = 'http://www.w3.org/2000/svg';
+const COLORS = ['#5ef0b8','#ffb547','#6cc4ff','#ff7eb6','#b69cff','#c6f25a','#ff9466','#5fe3e3'];
+const S = { access:null, sysex:false, active:false, routes:{} };
+const label = new Map();                 // port.id -> nome exibido
+const inColor = new Map();               // nome da entrada -> cor
+const inLeds = new Map(), outLeds = new Map(), wireEls = new Map();
+const held = new Map();                  // conexão -> Set(canal*128+nota) tocando na saída
+
+/* ---------- persistência (com migração da versão anterior) ---------- */
+const DEFBLK = () => ({ clk:false, sx:false, at:false, pc:false, pb:false });
+const newRoute = () => ({ ch:0, tr:0, blk:DEFBLK() });
+try {
+  let r = JSON.parse(localStorage.getItem(STORE));
+  if (!r) {
+    const old = JSON.parse(localStorage.getItem('midirouter.v1')) || {};
+    r = {};
+    for (const [k, v] of Object.entries(old)) if (v && v.on) r[k] = { ch:v.ch||0, tr:v.tr||0, blk:{ ...DEFBLK(), ...(v.blk||{}) } };
+  }
+  S.routes = r || {};
+} catch { S.routes = {}; }
+function save(){ try { localStorage.setItem(STORE, JSON.stringify(S.routes)); } catch {} }
+
+/* ---------- portas ---------- */
+const connected = kind => S.access ? [...S.access[kind].values()].filter(p => p.state === 'connected') : [];
+function buildLabels(){
+  label.clear();
+  for (const kind of ['inputs','outputs']) {
+    const n = {};
+    for (const p of S.access[kind].values()) {
+      const base = (p.name || 'Sem nome').trim();
+      n[base] = (n[base] || 0) + 1;
+      label.set(p.id, n[base] > 1 ? `${base} #${n[base]}` : base);
+    }
+  }
+}
+const outByLabel = L => connected('outputs').find(o => label.get(o.id) === L);
+const norm = s => s.toLowerCase().replace(/\s+/g, ' ').trim();
+const key = (i, o) => i + SEP + o;
+const split = k => k.split(SEP);
+
+/* ---------- roteamento ---------- */
+function heldSet(k){ let s = held.get(k); if (!s) held.set(k, s = new Set()); return s; }
+function releaseHeld(k, out){
+  const s = held.get(k); if (!s || !s.size) return;
+  out = out || outByLabel(split(k)[1]);
+  if (out) {
+    const chs = new Set();
+    try {
+      for (const v of s) { const ch = v >> 7; chs.add(ch); out.send([0x80 | ch, v & 127, 0]); }
+      for (const ch of chs) out.send([0xB0 | ch, 64, 0]);
+    } catch {}
+  }
+  s.clear();
+}
+function transform(d, r, k){
+  const st = d[0];
+  if (st >= 0xF8) return (r.blk.clk && st !== 0xFE) ? null : d;
+  if (st === 0xF0 || st === 0xF7) return r.blk.sx ? null : d;
+  if (st > 0xF0) return (r.blk.clk && (st === 0xF2 || st === 0xF3)) ? null : d;
+  const t = st & 0xF0; let ch = st & 0x0F;
+  if (r.blk.at && (t === 0xA0 || t === 0xD0)) return null;
+  if (r.blk.pc && t === 0xC0) return null;
+  if (r.blk.pb && t === 0xE0) return null;
+  if (r.ch) ch = r.ch - 1;
+  if (!r.ch && !r.tr && t !== 0x80 && t !== 0x90) return d;
+  const m = Uint8Array.from(d); m[0] = t | ch;
+  if (t === 0x80 || t === 0x90 || t === 0xA0) {
+    if (r.tr) { const n = d[1] + r.tr; if (n < 0 || n > 127) return null; m[1] = n; }
+    if (t === 0x90 && d[2] > 0) heldSet(k).add(ch * 128 + m[1]);
+    else if (t !== 0xA0) heldSet(k).delete(ch * 128 + m[1]);
+  }
+  return m;
+}
+function onMsg(inp, e){
+  if (!S.active) return;
+  const d = e.data, st = d[0], rt = st === 0xF8 || st === 0xFE;
+  const L = label.get(inp.id);
+  if (st === 0xF8) clockTick(e.timeStamp);
+  if (!rt) flash(inLeds.get(L));
+  let n = 0;
+  for (const out of S.access.outputs.values()) {
+    if (out.state !== 'connected') continue;
+    const OL = label.get(out.id), k = key(L, OL), r = S.routes[k];
+    if (!r) continue;
+    const m = transform(d, r, k);
+    if (!m) continue;
+    try {
+      out.send(m); n++;
+      if (!rt) { flash(outLeds.get(OL)); flash(wireEls.get(k), 'hot', 90); }
+    } catch {}
+  }
+  if (!rt) monitor(L, d, n);
+}
+function attach(){
+  for (const i of S.access.inputs.values()) i.onmidimessage = S.active ? (e => onMsg(i, e)) : null;
+}
+
+/* ---------- interface ---------- */
+function flash(el, cls = 'on', ms = 70){
+  if (!el) return;
+  el.classList.add(cls); clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove(cls), ms);
+}
+function tagText(r){
+  const p = [];
+  if (r.ch) p.push('CH' + r.ch);
+  if (r.tr) p.push((r.tr > 0 ? '+' : '') + r.tr);
+  if (Object.values(r.blk).some(Boolean)) p.push('⊘');
+  return p.join(' ');
+}
+let sel = null;                           // porta selecionada por clique {side,label}
+function makePort(side, L, color){
+  const p = document.createElement('div');
+  p.className = 'port'; p.dataset.side = side; p.dataset.label = L; p.title = L;
+  if (color) p.style.setProperty('--c', color);
+  const led = document.createElement('span'); led.className = 'led';
+  const name = document.createElement('span'); name.className = 'name'; name.textContent = L;
+  const cnt = document.createElement('span'); cnt.className = 'cnt';
+  const jack = document.createElement('span'); jack.className = 'jack';
+  if (side === 'in') p.append(led, name, cnt, jack); else p.append(jack, cnt, name, led);
+  (side === 'in' ? inLeds : outLeds).set(L, led);
+  return p;
+}
+function render(){
+  closePop();
+  const ins = connected('inputs'), outs = connected('outputs');
+  const insEl = $('ins'), outsEl = $('outs');
+  insEl.textContent = ''; outsEl.textContent = '';
+  inLeds.clear(); outLeds.clear(); inColor.clear();
+  ins.forEach((p, i) => inColor.set(label.get(p.id), COLORS[i % COLORS.length]));
+  if (!ins.length) insEl.innerHTML = '<div class="empty">Nenhuma entrada MIDI.<br>Conecte o controlador.</div>';
+  if (!outs.length) outsEl.innerHTML = '<div class="empty">Nenhuma saída MIDI.<br>Ligue os aparelhos.</div>';
+  for (const p of ins) { const L = label.get(p.id); insEl.append(makePort('in', L, inColor.get(L))); }
+  for (const p of outs) outsEl.append(makePort('out', label.get(p.id)));
+  if (sel && !portEl(sel.side, sel.label)) sel = null;
+  if (sel) portEl(sel.side, sel.label).classList.add('sel');
+  drawWires();
+}
+const portEl = (side, L) => [...document.querySelectorAll(`.col.${side} .port`)].find(p => p.dataset.label === L);
+function jackPos(el){
+  const b = $('board').getBoundingClientRect(), j = el.querySelector('.jack').getBoundingClientRect();
+  return { x: j.left + j.width / 2 - b.left, y: j.top + j.height / 2 - b.top };
+}
+function curve(a, b){
+  const dx = Math.max(50, Math.abs(b.x - a.x) * .5);
+  return `M${a.x},${a.y} C${a.x + dx},${a.y} ${b.x - dx},${b.y} ${b.x},${b.y}`;
+}
+function svg(tag, attrs){ const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); return e; }
+
+function drawWires(){
+  const W = $('wires'), T = $('labels');
+  W.textContent = ''; T.textContent = ''; wireEls.clear();
+  const ins = new Map([...document.querySelectorAll('.col.in .port')].map(p => [p.dataset.label, p]));
+  const outs = new Map([...document.querySelectorAll('.col.out .port')].map(p => [p.dataset.label, p]));
+  const cIn = {}, cOut = {};
+  let n = 0;
+  for (const [k, r] of Object.entries(S.routes)) {
+    const [iL, oL] = split(k), pi = ins.get(iL), po = outs.get(oL);
+    if (!pi || !po) continue;
+    n++; cIn[iL] = (cIn[iL] || 0) + 1; cOut[oL] = (cOut[oL] || 0) + 1;
+    const a = jackPos(pi), b = jackPos(po), d = curve(a, b), c = inColor.get(iL);
+    const g = svg('g', {}); g.style.setProperty('--c', c);
+    const hit = svg('path', { d, class:'hit' });
+    const w = svg('path', { d, class:'w' + (norm(iL) === norm(oL) ? ' loop' : '') + (popKey === k ? ' sel' : '') });
+    hit.addEventListener('click', e => openPop(k, e.clientX, e.clientY));
+    g.append(hit, w); W.append(g); wireEls.set(k, w);
+    const t = tagText(r) || (norm(iL) === norm(oL) ? '⟲' : '');
+    if (t) {
+      const tag = document.createElement('div'); tag.className = 'tag'; tag.textContent = t;
+      tag.style.setProperty('--c', c);
+      tag.style.left = (a.x + b.x) / 2 + 'px'; tag.style.top = (a.y + b.y) / 2 + 'px';
+      if (t === '⟲') tag.title = 'Mesmo aparelho: se ele tiver MIDI Thru/eco ligado, pode criar realimentação.';
+      tag.onclick = e => openPop(k, e.clientX, e.clientY);
+      T.append(tag);
+    }
+  }
+  for (const [L, p] of ins) { const c = cIn[L] || 0; p.classList.toggle('linked', c > 0); p.querySelector('.cnt').textContent = c || ''; }
+  for (const [L, p] of outs) { const c = cOut[L] || 0; p.classList.toggle('linked', c > 0); p.querySelector('.cnt').textContent = c || '';
+    const first = Object.keys(S.routes).find(k => split(k)[1] === L && ins.has(split(k)[0]));
+    p.style.setProperty('--c', first ? inColor.get(split(first)[0]) : ''); }
+  const ni = ins.size, no = outs.size;
+  $('summary').textContent = `${ni} entrada${ni !== 1 ? 's' : ''} · ${no} saída${no !== 1 ? 's' : ''} · ${n} ${n !== 1 ? 'conexões' : 'conexão'}`;
+  document.title = n ? `MIDI Router · ${n}` : 'MIDI Router';
+}
+
+/* ---------- ligar cabos: arrastar ou clicar ---------- */
+function connect(iL, oL){
+  const k = key(iL, oL);
+  if (!S.routes[k]) { S.routes[k] = newRoute(); save(); }
+  drawWires();
+}
+function removeRoute(k){
+  releaseHeld(k); delete S.routes[k]; save(); closePop(); drawWires();
+}
+function setSel(s){
+  document.querySelectorAll('.port.sel').forEach(p => p.classList.remove('sel'));
+  sel = s; if (s) portEl(s.side, s.label)?.classList.add('sel');
+}
+let drag = null, tmp = null, tgt = null;
+$('board').addEventListener('pointerdown', e => {
+  const p = e.target.closest('.port'); if (!p || e.button !== 0) return;
+  e.preventDefault(); closePop();
+  drag = { side:p.dataset.side, label:p.dataset.label, el:p, x0:e.clientX, y0:e.clientY, moved:false };
+});
+window.addEventListener('pointermove', e => {
+  if (!drag) return;
+  if (!drag.moved && Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) > 5) {
+    drag.moved = true; $('board').classList.add('dragging');
+    tmp = svg('path', { class:'tmp' }); $('wires').append(tmp);
+  }
+  if (!drag.moved) return;
+  const b = $('board').getBoundingClientRect(), pt = { x:e.clientX - b.left, y:e.clientY - b.top };
+  const j = jackPos(drag.el);
+  tmp.setAttribute('d', drag.side === 'in' ? curve(j, pt) : curve(pt, j));
+  const t = document.elementFromPoint(e.clientX, e.clientY)?.closest('.port');
+  const ok = t && t.dataset.side !== drag.side ? t : null;
+  if (ok !== tgt) { tgt?.classList.remove('target'); tgt = ok; tgt?.classList.add('target'); }
+});
+window.addEventListener('pointerup', e => {
+  if (!drag) return;
+  const d = drag; drag = null;
+  $('board').classList.remove('dragging'); tmp?.remove(); tmp = null;
+  tgt?.classList.remove('target'); tgt = null;
+  const t = document.elementFromPoint(e.clientX, e.clientY)?.closest('.port');
+  if (d.moved) {
+    if (t && t.dataset.side !== d.side) {
+      d.side === 'in' ? connect(d.label, t.dataset.label) : connect(t.dataset.label, d.label);
+    }
+    setSel(null);
+    return;
+  }
+  // clique simples: seleciona uma ponta e depois a outra para ligar/desligar
+  if (sel && sel.side !== d.side) {
+    const [iL, oL] = d.side === 'in' ? [d.label, sel.label] : [sel.label, d.label];
+    const k = key(iL, oL);
+    S.routes[k] ? removeRoute(k) : connect(iL, oL);
+    setSel(null);
+  } else setSel(sel && sel.label === d.label && sel.side === d.side ? null : { side:d.side, label:d.label });
+});
+new ResizeObserver(() => drawWires()).observe($('board'));
+
+/* ---------- opções do cabo ---------- */
+let popKey = null, popXY = null;
+const pop = $('pop');
+(() => {
+  const s = $('popCh');
+  s.add(new Option('Igual à entrada', 0));
+  for (let i = 1; i <= 16; i++) s.add(new Option('Canal ' + i, i));
+})();
+function fillPop(){
+  const r = S.routes[popKey]; if (!r) return closePop();
+  const [a, b] = split(popKey);
+  pop.style.setProperty('--c', inColor.get(a) || 'var(--acc)');
+  $('popIn').textContent = a; $('popOut').textContent = b;
+  $('popCh').value = r.ch;
+  $('popTr').textContent = (r.tr > 0 ? '+' : '') + r.tr;
+  for (const btn of $('popBlk').children) {
+    btn.classList.toggle('on', !!r.blk[btn.dataset.b]);
+    if (btn.dataset.b === 'sx') { btn.disabled = !S.sysex; if (!S.sysex) btn.title = 'SysEx não foi permitido pelo navegador'; }
+  }
+}
+function openPop(k, x, y){
+  setSel(null);
+  popKey = k; popXY = [x, y]; fillPop(); pop.hidden = false;
+  const w = pop.offsetWidth, h = pop.offsetHeight;
+  pop.style.left = Math.min(Math.max(10, x - w / 2), innerWidth - w - 10) + 'px';
+  pop.style.top = (y + 14 + h > innerHeight - 10 ? Math.max(10, y - h - 14) : y + 14) + 'px';
+  drawWires();
+}
+function closePop(){
+  if (pop.hidden) return;
+  pop.hidden = true; popKey = null;
+  wireEls.forEach(w => w.classList.remove('sel'));
+}
+function editRoute(fn, releases){
+  const r = S.routes[popKey]; if (!r) return;
+  if (releases) releaseHeld(popKey);
+  fn(r); save(); fillPop(); drawWires();
+}
+$('popCh').onchange = e => editRoute(r => r.ch = +e.target.value, true);
+pop.querySelectorAll('.step button').forEach(b => b.onclick = () =>
+  editRoute(r => r.tr = Math.max(-48, Math.min(48, r.tr + +b.dataset.d)), true));
+$('popBlk').onclick = e => { const b = e.target.closest('button'); if (!b || b.disabled) return;
+  editRoute(r => r.blk[b.dataset.b] = !r.blk[b.dataset.b], b.dataset.b === 'pb'); };
+$('popReset').onclick = () => editRoute(r => Object.assign(r, newRoute()), true);
+$('popDel').onclick = () => removeRoute(popKey);
+document.addEventListener('pointerdown', e => {
+  if (!pop.hidden && !pop.contains(e.target) && !e.target.closest('.hit,.tag')) closePop();
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { closePop(); setSel(null); }
+  if ((e.key === 'Delete' || e.key === 'Backspace') && popKey && document.activeElement?.tagName !== 'SELECT') removeRoute(popKey);
+});
+
+/* ---------- monitor e clock ---------- */
+const NN = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const note = n => NN[n % 12] + (Math.floor(n / 12) - 1);
+function describe(d){
+  const st = d[0];
+  if (st === 0xF0) return `SysEx · ${d.length} bytes`;
+  if (st >= 0xF0) return ({0xF2:'Song Position',0xF3:'Song Select',0xF6:'Tune Request',0xFA:'▶ Start',0xFB:'▶ Continue',0xFC:'■ Stop',0xFF:'Reset'})[st] || 'Sistema ' + st.toString(16).toUpperCase();
+  const t = st & 0xF0, ch = (st & 15) + 1;
+  const m = {
+    0x90: d[2] ? `Note On  ${note(d[1])}  vel ${d[2]}` : `Note Off ${note(d[1])}`,
+    0x80: `Note Off ${note(d[1])}`,
+    0xA0: `Poly AT  ${note(d[1])}  ${d[2]}`,
+    0xB0: `CC ${d[1]} = ${d[2]}`,
+    0xC0: `Program ${d[1] + 1}`,
+    0xD0: `Aftertouch ${d[1]}`,
+    0xE0: `Pitch Bend ${((d[2] << 7) | d[1]) - 8192}`,
+  }[t];
+  return `${m}  · ch ${ch}`;
+}
+let monPending = null;
+function monitor(L, d, n){
+  const first = !monPending;
+  monPending = { L, d, n };
+  flash($('monLed'));
+  if (first) requestAnimationFrame(() => {
+    const { L, d, n } = monPending; monPending = null;
+    const t = $('monTxt'); t.textContent = '';
+    const s = document.createElement('span'); s.className = 'src'; s.textContent = L + ' › ';
+    t.append(s, describe(d) + (n ? `  → ${n} saída${n > 1 ? 's' : ''}` : '  → sem conexão'));
+  });
+}
+const clk = []; let lastClk = -1e9;
+function clockTick(ts){ clk.push(ts); if (clk.length > 49) clk.shift(); lastClk = ts; }
+setInterval(() => {
+  const el = $('bpm');
+  if (clk.length >= 13 && performance.now() - lastClk < 800) {
+    const per = (clk[clk.length - 1] - clk[0]) / (clk.length - 1);
+    el.textContent = '♩ ' + (60000 / (per * 24)).toFixed(1);
+  } else { el.textContent = ''; if (performance.now() - lastClk > 800) clk.length = 0; }
+}, 250);
+
+/* ---------- pânico, desligar tudo ---------- */
+$('panic').onclick = () => {
+  for (const out of connected('outputs')) {
+    try { for (let ch = 0; ch < 16; ch++) { out.send([0xB0|ch, 64, 0]); out.send([0xB0|ch, 123, 0]); out.send([0xB0|ch, 120, 0]); } } catch {}
+  }
+  held.clear();
+  const b = $('panic'); b.classList.add('fired'); setTimeout(() => b.classList.remove('fired'), 220);
+};
+$('clear').onclick = () => {
+  if (!Object.keys(S.routes).length || !confirm('Desligar todos os cabos?')) return;
+  for (const k of Object.keys(S.routes)) releaseHeld(k);
+  S.routes = {}; save(); closePop(); drawWires();
+};
+
+/* ---------- uma janela ativa por vez ---------- */
+const ME = Math.random().toString(36).slice(2);
+let bc = null; try { bc = new BroadcastChannel('midi-router'); } catch {}
+function claim(){
+  S.active = true; $('idle').hidden = true;
+  if (S.access) attach();
+  bc && bc.postMessage({ t:'claim', id:ME });
+}
+function goIdle(){
+  S.active = false; $('idle').hidden = false;
+  if (S.access) { for (const k of Object.keys(S.routes)) releaseHeld(k); attach(); }
+}
+if (bc) bc.onmessage = e => { if (e.data?.t === 'claim' && e.data.id !== ME && S.active) goIdle(); };
+$('claim').onclick = claim;
+$('popout').onclick = () => window.open(location.href, 'midirouter', 'width=900,height=640');
+
+/* ---------- início ---------- */
+let sig = '', stT;
+const portSig = () => [...connected('inputs'), ...connected('outputs')].map(p => p.id).join('|');
+function onState(){
+  clearTimeout(stT);
+  stT = setTimeout(() => {
+    const now = portSig(); if (now === sig) return; sig = now;
+    buildLabels();
+    for (const k of [...held.keys()]) if (!outByLabel(split(k)[1])) held.delete(k);
+    if (S.active) attach();
+    render();
+  }, 120);
+}
+const showNote = html => { $('msg').innerHTML = `<div class="note">${html}</div>`; };
+async function init(){
+  if (!navigator.requestMIDIAccess) { showNote('Este navegador não tem Web MIDI. Abra o arquivo no <b>Google Chrome</b> ou no Edge.'); $('summary').textContent = 'sem Web MIDI'; render(); return; }
+  try { S.access = await navigator.requestMIDIAccess({ sysex:true }); S.sysex = true; }
+  catch {
+    try { S.access = await navigator.requestMIDIAccess(); }
+    catch { showNote('Acesso MIDI negado. Clique no ícone à esquerda do endereço, permita <b>Dispositivos MIDI</b> e recarregue a página.'); $('summary').textContent = 'acesso negado'; render(); return; }
+  }
+  $('sx').classList.toggle('ok', S.sysex);
+  $('sx').title = S.sysex ? 'SysEx liberado' : 'SysEx não permitido — o resto funciona normalmente';
+  S.access.onstatechange = onState;
+  sig = portSig(); buildLabels(); render(); claim();
+}
+init();
+</script>
+</body>
+</html>
